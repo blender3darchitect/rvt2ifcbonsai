@@ -232,6 +232,8 @@ FILE_NAME('0001','...',('User'),('DataDrivenConstruction'),'ODA SDAI 27.2',$,'Da
 
 Bonsai surfaces these as **Organisation** and **Authoriser** in Project Info. Those fields describe who authored and signed off the data — they are not the place to advertise the converter. Both are set to blank.
 
+**The script blanks these fields; it never substitutes another name.** It does not write in the name of whoever runs it. Someone repairing an IFC is usually not the author of the building model — they received the file from whoever designed it — so the honest state is empty, leaving the fields available for whoever actually holds authorship to fill in. Writing any name there automatically would recreate the same false claim this fix removes.
+
 What is deliberately left alone: `preprocessor_version` (`ODA SDAI 27.2`) and the `IfcApplication` / `IfcOrganization` entities naming `RVT2IFCconverter`. Those exist precisely to record which tool produced the file, and stripping them would misrepresent its provenance.
 
 ---
