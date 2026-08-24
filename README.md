@@ -1,5 +1,7 @@
 # fix_cad2data — Repair cad2data (ODA) IFC Files for Bonsai BIM
 
+***English** · [Português (Brasil)](README.pt-BR.md)*
+
 A Python script that fixes structural defects in IFC files produced by the [cad2data](https://github.com/datadrivenconstruction/cad2data-Revit-IFC-DWG-DGN) Revit-to-IFC converter, making them compatible with [Bonsai BIM](https://bonsaibim.org) (the Blender BIM add-on).
 
 This enables a fully free, offline, no-Revit pipeline: `.rvt` → cad2data → `fix_cad2data.py` → Bonsai.

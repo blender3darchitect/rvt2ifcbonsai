@@ -1,6 +1,8 @@
 """
 fix_cad2data.py — Aggressive repair of cad2data IFC for Bonsai
 
+Version 0.0.2
+
 The crash at collector.py:125 happens because elements are contained
 in IfcSpaces that have no parent in the spatial hierarchy (no
 IfcRelAggregates connecting them to an IfcBuildingStorey).
@@ -22,6 +24,15 @@ import ifcopenshell.api
 import ifcopenshell.util.element
 import sys
 import os
+
+__version__ = "0.0.2"
+
+# STATUS: early days. This has been validated against a small number of
+# cad2data conversions only. It needs testing against a much wider range of
+# Revit files — multi-building projects, linked models, mezzanines and split
+# levels, and IFC2x3 output as well as IFC4 — and will likely need additional
+# fixes as those cases turn up defects this script does not yet handle.
+# Treat a successful run as "worth checking in Bonsai", not as a guarantee.
 
 
 def find_parent_storey(element, f):
@@ -54,6 +65,7 @@ def find_parent_storey(element, f):
 
 
 def fix_file(input_path, output_path):
+    print(f"fix_cad2data {__version__}")
     print(f"Opening {input_path}...")
     f = ifcopenshell.open(input_path)
     print(f"Schema: {f.schema}")
