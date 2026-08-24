@@ -1,16 +1,16 @@
 """
-fix_cad2data.py — Aggressive repair of cad2data IFC for Bonsai
+fix_cad2data.py — Repair of cad2data IFC for Bonsai
 
-Version 0.0.2
+Version 0.0.3
 
 The crash at collector.py:125 happens because elements are contained
 in IfcSpaces that have no parent in the spatial hierarchy (no
 IfcRelAggregates connecting them to an IfcBuildingStorey).
 
-This script takes the nuclear approach: every element currently
-contained in an IfcSpace gets moved to a storey directly, bypassing
-the broken IfcSpace chain entirely. IfcSpaces without a parent get
-aggregated into a fallback storey.
+IfcSpaces without a parent are aggregated into the storey matching
+their absolute elevation. Elements whose containment chain still fails
+to resolve to a storey are reassigned directly to one, bypassing the
+broken IfcSpace.
 
 Also fixes IfcShapeAspect.ProductDefinitional for Optimise compat.
 
@@ -22,10 +22,11 @@ Usage:
 import ifcopenshell
 import ifcopenshell.api
 import ifcopenshell.util.element
+import ifcopenshell.util.placement
 import sys
 import os
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 # STATUS: early days. This has been validated against a small number of
 # cad2data conversions only. It needs testing against a much wider range of
@@ -33,6 +34,33 @@ __version__ = "0.0.2"
 # levels, and IFC2x3 output as well as IFC4 — and will likely need additional
 # fixes as those cases turn up defects this script does not yet handle.
 # Treat a successful run as "worth checking in Bonsai", not as a guarantee.
+
+
+def find_storey_by_elevation(element, storeys, fallback):
+    """Pick the storey an element belongs to by comparing elevations.
+
+    Returns the highest IfcBuildingStorey whose Elevation is at or below the
+    element's absolute Z, or `fallback` if the position cannot be determined.
+
+    The Z must be absolute. IfcLocalPlacement.RelativePlacement.Location is
+    relative to the parent placement, and cad2data leaves that at the origin
+    for IfcSpaces — every space reads as Z=0 and matches only a below-grade
+    storey. get_local_placement() resolves the full placement chain, which is
+    what makes the comparison against storey Elevation meaningful.
+    """
+    try:
+        z = ifcopenshell.util.placement.get_local_placement(element.ObjectPlacement)[2][3]
+    except Exception:
+        return fallback
+
+    best, best_elevation = fallback, None
+    for storey in storeys:
+        elevation = storey.Elevation
+        if elevation is None or elevation > z + 1e-6:
+            continue
+        if best_elevation is None or elevation > best_elevation:
+            best, best_elevation = storey, elevation
+    return best
 
 
 def find_parent_storey(element, f):
@@ -106,16 +134,9 @@ def fix_file(input_path, output_path):
 
     if orphan_spaces:
         print(f"  Found {len(orphan_spaces)} IfcSpace(s) not aggregated into any storey")
+        assigned = {}
         for space in orphan_spaces:
-            # Find best storey by comparing elevations if possible
-            best_storey = fallback
-            try:
-                space_z = space.ObjectPlacement.RelativePlacement.Location.Coordinates[2]
-                for storey in storeys:
-                    if storey.Elevation is not None and storey.Elevation <= space_z:
-                        best_storey = storey
-            except Exception:
-                pass
+            best_storey = find_storey_by_elevation(space, storeys, fallback)
 
             try:
                 ifcopenshell.api.run(
@@ -124,10 +145,16 @@ def fix_file(input_path, output_path):
                     products=[space],
                     relating_object=best_storey,
                 )
+                assigned[best_storey.Name] = assigned.get(best_storey.Name, 0) + 1
                 fixes += 1
             except Exception as e:
                 print(f"    Could not aggregate IfcSpace #{space.id()} '{space.Name}': {e}")
-        print(f"  Aggregated {len(orphan_spaces)} IfcSpaces into storeys")
+        print(f"  Aggregated {sum(assigned.values())} IfcSpaces into storeys:")
+        for name, count in sorted(assigned.items(), key=lambda kv: -kv[1]):
+            print(f"    {count:5d} -> '{name}'")
+        if len(assigned) == 1 and len(storeys) > 1:
+            print("  WARNING: every IfcSpace landed on a single storey.")
+            print("  This usually means the elevation lookup failed — check the result in Bonsai.")
     else:
         print("  All IfcSpaces have parent aggregation — OK")
 
@@ -152,16 +179,7 @@ def fix_file(input_path, output_path):
         print(f"    In IfcSpace with no parent storey: {in_orphan_space}")
 
         for element, space in broken_elements:
-            target = fallback
-            # Try to find best storey by element elevation
-            try:
-                coords = element.ObjectPlacement.RelativePlacement.Location.Coordinates
-                z = coords[2] if len(coords) > 2 else 0
-                for storey in storeys:
-                    if storey.Elevation is not None and storey.Elevation <= z:
-                        target = storey
-            except Exception:
-                pass
+            target = find_storey_by_elevation(element, storeys, fallback)
 
             try:
                 ifcopenshell.api.run(

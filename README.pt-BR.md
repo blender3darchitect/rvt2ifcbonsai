@@ -136,6 +136,8 @@ O cad2data cria relacionamentos `IfcRelVoidsElement` individuais para cada abert
 
 Isso é um **problema de exibição**, não de dados. Os dados IFC (portas, janelas e seus relacionamentos com as paredes) estão íntegros e consultáveis. Apenas os recortes não são aplicados visualmente à geometria da parede na viewport do Bonsai.
 
+> **Correção, medida no modelo de teste.** A saída do cad2data examinada para a 0.0.3 contém **zero** `IfcOpeningElement` e **zero** `IfcRelVoidsElement` — os vãos de portas e janelas já vêm embutidos diretamente na geometria tesselada, portanto não há operação booleana para o Bonsai ignorar e o aviso acima não pode se originar desse arquivo. Suas paredes são `IfcPolygonalFaceSet`, e não `IfcFacetedBrep` como afirmado na seção acima. Os avisos de voids excessivos originalmente atribuídos ao cad2data vieram de *outra exportação do mesmo edifício*, importada na mesma sessão do Blender; os GlobalIds coincidem porque são originados no Revit e sobrevivem aos dois exportadores. Se outras conversões do cad2data emitem relacionamentos de void reais é algo ainda não testado — trate esta seção como não verificada até que exista um arquivo que a reproduza.
+
 ---
 
 ## O Que o Script Faz
@@ -144,7 +146,7 @@ Isso é um **problema de exibição**, não de dados. Os dados IFC (portas, jane
 
 O script executa cinco correções e duas passagens de diagnóstico:
 
-1. **Corrige a agregação de IfcSpaces órfãos** — Encontra todo `IfcSpace` sem pai via `IfcRelAggregates` e o conecta ao `IfcBuildingStorey` apropriado (correspondido por elevação quando possível, com recuo para o pavimento mais baixo).
+1. **Corrige a agregação de IfcSpaces órfãos** — Encontra todo `IfcSpace` sem pai via `IfcRelAggregates` e o conecta ao `IfcBuildingStorey` apropriado (correspondido por elevação absoluta quando possível, com recuo para o pavimento mais baixo). Informa a distribuição resultante por pavimento.
 
 2. **Corrige cadeias de contenção quebradas** — Para cada `IfcElement`, percorre toda a cadeia de contenção para verificar se ela chega a um `IfcBuildingStorey`. Elementos cuja cadeia está quebrada (sem contêiner algum, ou contidos em um `IfcSpace` órfão) são reatribuídos diretamente a um pavimento.
 
@@ -177,7 +179,17 @@ for space in f.by_type("IfcSpace"):
 
 `aggregate.assign_object` cria o relacionamento `IfcRelAggregates` ausente, conectando o `IfcSpace` a um pavimento. Feito isso, o laço `while container.is_a("IfcSpace")` do Bonsai consegue subir do space até o pavimento pai sem esbarrar em `None`.
 
-**Correspondência de pavimento por elevação:** O script tenta encontrar o pavimento correto comparando a coordenada Z do IfcSpace com as elevações dos pavimentos. Ele escolhe o pavimento mais alto cuja elevação esteja igual ou abaixo da posição do space. Se as coordenadas não puderem ser lidas (alguns elementos não têm posicionamento explícito), ele recorre ao pavimento de menor elevação do arquivo.
+**Correspondência de pavimento por elevação:** O script encontra o pavimento correto comparando o Z **absoluto** do IfcSpace com as elevações dos pavimentos, escolhendo o pavimento mais alto cuja elevação esteja igual ou abaixo do space. Se a posição não puder ser resolvida, ele recorre ao pavimento de menor elevação do arquivo.
+
+A palavra *absoluto* é essencial aqui. `IfcLocalPlacement.RelativePlacement.Location` fornece coordenadas **relativas ao posicionamento pai**, e o cad2data deixa esse valor na origem para os IfcSpaces — ou seja, lê-lo diretamente devolve `Z = 0` para todos os spaces do modelo. Comparado com as elevações reais dos pavimentos, `0` só corresponde a um pavimento abaixo do nível do solo, e todos os ambientes do edifício acabam agregados ao nível de fundação. O reparo "funciona", a passagem de verificação informa cadeias íntegras, o Bonsai importa sem erro — e todos os ambientes estão na coleção errada.
+
+`ifcopenshell.util.placement.get_local_placement()` resolve toda a cadeia de posicionamento e devolve a transformação absoluta, que é o que torna a comparação significativa:
+
+```python
+z = ifcopenshell.util.placement.get_local_placement(space.ObjectPlacement)[2][3]
+```
+
+No hotel de 11 pavimentos usado nos testes, essa é a diferença entre os 124 spaces caírem todos no nível de fundação e se distribuírem corretamente pelos três níveis que de fato contêm ambientes. Corrigido na 0.0.3; veja o [Histórico de versões](#histórico-de-versões).
 
 #### Correção 2: cadeias de elementos quebradas
 
@@ -338,7 +350,8 @@ Para verificar que a correção funciona:
 - **Arquivos com múltiplas edificações** — O cad2data separa corretamente os elementos entre várias entidades IfcBuilding? A seleção do pavimento de recuo do script talvez precise levar isso em conta.
 - **Modelos vinculados** — O log do console do Bonsai sugere que o arquivo do hotel continha modelos vinculados/referenciados. Cada modelo vinculado pode precisar de reparo independente.
 - **Limites de ambiente (IfcSpace boundaries)** — O script não verifica os relacionamentos `IfcRelSpaceBoundary`. Eles definem quais elementos delimitam um ambiente (paredes, pisos, forros). Se o cad2data também falhar em criá-los, análises baseadas em ambientes (energia, tabelas de acabamento) ficarão incompletas.
-- **Precisão da elevação dos pavimentos** — A correspondência por elevação usa a heurística simples "pavimento mais alto igual ou abaixo do Z do elemento". Isso pode atribuir elementos incorretamente em edifícios com mezaninos, meios-níveis ou pés-direitos fora do padrão.
+- **Precisão da elevação dos pavimentos** — A correspondência por elevação usa a heurística simples "pavimento mais alto igual ou abaixo do Z absoluto do elemento". Ela resolve toda a cadeia de posicionamento (corrigido na 0.0.3), mas a heurística em si ainda pode atribuir elementos incorretamente em edifícios com mezaninos, meios-níveis ou pés-direitos fora do padrão.
+- **Atribuição errada silenciosa** — A passagem de verificação confirma que cada cadeia de contenção *resolve*, não que ela resolve *corretamente*. Um arquivo pode passar na verificação, importar sem erros no Bonsai e ainda assim ter elementos no pavimento errado. Confira o painel de decomposição espacial após a importação; o script agora imprime a distribuição de spaces por pavimento, de modo que um resultado claramente errado fique visível no console.
 - **IFC2x3 vs. IFC4** — O cad2data pode exportar os dois. O script usa a API do IfcOpenShell, que lida com ambos os schemas, mas a estrutura da hierarquia espacial difere ligeiramente entre eles. Recomenda-se testar com saída IFC2x3.
 
 ### Melhorias possíveis
@@ -381,6 +394,22 @@ Documentação, auditoria, coordenação
 Todas as etapas rodam localmente. Sem contas na nuvem, sem assinatura da Autodesk, sem uploads. O modelo nunca sai da máquina — o que é relevante para projetos com requisitos de confidencialidade.
 
 ---
+
+## Histórico de versões
+
+O script imprime sua versão ao iniciar, para que a saída do console possa ser rastreada até o código que a produziu.
+
+### 0.0.3
+
+- **Corrigido: todo IfcSpace era atribuído ao pavimento errado.** A correspondência por elevação lia `ObjectPlacement.RelativePlacement.Location`, que é relativo ao posicionamento pai e vale `0` para os IfcSpaces do cad2data. Todo space, portanto, correspondia apenas a um pavimento abaixo do nível do solo. Agora é resolvido via `ifcopenshell.util.placement.get_local_placement()`. No modelo de teste, isso tirou 124 spaces do nível de fundação e os colocou nos três níveis que realmente os contêm.
+- A seleção de pavimento agora usa o pavimento *mais alto* que qualifica, em vez do último encontrado na ordem do arquivo. Os dois resultados coincidiam quando `by_type()` devolvia os pavimentos em ordem de elevação, e divergiam quando não.
+- A Correção 1 agora imprime a distribuição de spaces por pavimento e avisa quando todos caem em um único pavimento — o sintoma visível do defeito acima.
+- Os dois pontos de chamada da elevação compartilham um único helper `find_storey_by_elevation()`.
+- Corrigida a mensagem de uso, que citava um nome de arquivo inexistente.
+
+### 0.0.2
+
+- Primeira versão numerada. Comportamento inalterado em relação ao script original; adicionados o relato de versão e uma nota de status sobre cobertura de testes.
 
 ## Licença
 

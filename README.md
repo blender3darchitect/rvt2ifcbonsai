@@ -136,6 +136,8 @@ cad2data creates individual `IfcRelVoidsElement` relationships for each door/win
 
 This is a **display issue**, not a data issue. The IFC data (doors, windows, their relationships to walls) is intact and queryable. The openings just aren't visually cut into the wall geometry in Bonsai's viewport.
 
+> **Correction, measured against the test model.** The cad2data output examined for 0.0.3 contains **zero** `IfcOpeningElement` and **zero** `IfcRelVoidsElement` — the door and window holes are baked directly into tessellated geometry, so there is no boolean for Bonsai to skip and the warning above cannot arise from that file. Its walls are `IfcPolygonalFaceSet`, not `IfcFacetedBrep` as stated in the section above. The excessive-void warnings originally attributed to cad2data came from a *different export of the same building* imported in the same Blender session; the GlobalIds match because they originate in Revit and survive both exporters. Whether other cad2data conversions emit real void relationships is untested — treat this section as unverified until a file that reproduces it is available.
+
 ---
 
 ## What the Script Does
@@ -144,7 +146,7 @@ This is a **display issue**, not a data issue. The IFC data (doors, windows, the
 
 The script performs five fixes and two diagnostic passes:
 
-1. **Fix orphan IfcSpace aggregation** — Finds every `IfcSpace` that has no parent via `IfcRelAggregates` and connects it to the appropriate `IfcBuildingStorey` (matched by elevation when possible, fallback to lowest storey).
+1. **Fix orphan IfcSpace aggregation** — Finds every `IfcSpace` that has no parent via `IfcRelAggregates` and connects it to the appropriate `IfcBuildingStorey` (matched by absolute elevation when possible, fallback to lowest storey). Reports the resulting per-storey distribution.
 
 2. **Fix broken element containment chains** — For every `IfcElement`, walks the full containment chain to verify it resolves to an `IfcBuildingStorey`. Elements whose chain is broken (either no container at all, or contained in an orphan `IfcSpace`) get reassigned directly to a storey.
 
@@ -177,7 +179,17 @@ for space in f.by_type("IfcSpace"):
 
 `aggregate.assign_object` creates the missing `IfcRelAggregates` relationship, connecting the `IfcSpace` to a storey. After this, Bonsai's `while container.is_a("IfcSpace")` loop can walk up from the space to its parent storey without hitting `None`.
 
-**Storey matching by elevation:** The script attempts to find the correct storey by comparing the IfcSpace's Z coordinate against storey elevations. It picks the highest storey whose elevation is at or below the space's position. If coordinates can't be read (some elements lack explicit placement), it falls back to the lowest-elevation storey in the file.
+**Storey matching by elevation:** The script finds the correct storey by comparing the IfcSpace's **absolute** Z against storey elevations, picking the highest storey whose elevation is at or below the space. If the position can't be resolved, it falls back to the lowest-elevation storey in the file.
+
+The word *absolute* is doing real work here. `IfcLocalPlacement.RelativePlacement.Location` gives coordinates **relative to the parent placement**, and cad2data leaves that at the origin for IfcSpaces — so reading it directly returns `Z = 0` for every space in the model. Compared against real storey elevations, `0` matches only a below-grade storey, and every room in the building gets aggregated into the foundation level. The repair "succeeds", the verification pass reports clean chains, Bonsai imports without error — and all the rooms are in the wrong collection.
+
+`ifcopenshell.util.placement.get_local_placement()` resolves the full placement chain and returns the absolute transform, which is what makes the comparison meaningful:
+
+```python
+z = ifcopenshell.util.placement.get_local_placement(space.ObjectPlacement)[2][3]
+```
+
+On the 11-storey hotel used for testing, this is the difference between all 124 spaces landing on the foundation level and distributing correctly across the three levels that actually contain rooms. Fixed in 0.0.3; see [Version history](#version-history).
 
 #### Fix 2: Broken element chains
 
@@ -338,7 +350,8 @@ To verify the fix works:
 - **Multi-building files** — Does cad2data correctly separate elements across multiple IfcBuilding entities? The script's fallback storey selection may need to account for this.
 - **Linked models** — The Bonsai console log suggests the hotel file contained linked/referenced models. Each linked model may need independent repair.
 - **IfcSpace boundaries** — The script does not check `IfcRelSpaceBoundary` relationships. These define which elements bound a space (walls, floors, ceilings). If cad2data also fails to create these, space-based analysis (energy, room finish schedules) will be incomplete.
-- **Storey elevation accuracy** — The elevation-based storey matching uses a simple "highest storey at or below element Z" heuristic. This may misassign elements in buildings with mezzanines, split levels, or non-standard storey heights.
+- **Storey elevation accuracy** — The elevation matching uses a simple "highest storey at or below the element's absolute Z" heuristic. It resolves the full placement chain (fixed in 0.0.3), but the heuristic itself may still misassign elements in buildings with mezzanines, split levels, or non-standard storey heights.
+- **Silent misassignment** — The verification pass confirms every containment chain *resolves*, not that it resolves *correctly*. A file can pass verification, import cleanly into Bonsai, and still have elements in the wrong storey. Check the spatial decomposition panel after import; the script now prints the per-storey distribution of aggregated spaces so an obviously wrong result is visible in the console.
 - **IFC2x3 vs IFC4** — cad2data can export both. The script uses IfcOpenShell's API which handles both schemas, but the spatial hierarchy structure differs slightly between them. Testing with IFC2x3 output is recommended.
 
 ### Potential improvements
@@ -381,6 +394,22 @@ Documentation, audit, coordination
 Every step runs locally. No cloud accounts, no Autodesk subscription, no uploads. The model never leaves the machine — relevant for projects with confidentiality requirements.
 
 ---
+
+## Version history
+
+The script prints its version at startup, so console output can be traced back to the code that produced it.
+
+### 0.0.3
+
+- **Fixed: every IfcSpace was assigned to the wrong storey.** Elevation matching read `ObjectPlacement.RelativePlacement.Location`, which is relative to the parent placement and is `0` for cad2data's IfcSpaces. Every space therefore matched only a below-grade storey. Now resolved through `ifcopenshell.util.placement.get_local_placement()`. On the test model this moved 124 spaces off the foundation level and onto the three levels that contain them.
+- Storey selection now takes the *highest* qualifying storey rather than the last one encountered in file order. The two agreed whenever `by_type()` happened to return storeys in elevation order, and disagreed when it didn't.
+- Fix 1 now prints the per-storey distribution of aggregated spaces, and warns when every space lands on a single storey — the visible symptom of the bug above.
+- Both elevation call sites share one `find_storey_by_elevation()` helper.
+- Corrected the usage string, which named a filename that doesn't exist.
+
+### 0.0.2
+
+- First versioned release. Behaviour unchanged from the original script; added version reporting and a status note on testing coverage.
 
 ## License
 
