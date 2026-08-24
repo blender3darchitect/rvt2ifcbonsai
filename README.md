@@ -382,7 +382,7 @@ Every step runs locally. No cloud accounts, no Autodesk subscription, no uploads
 
 ## License
 
-MIT
+GPL-3.0 — see [LICENSE](LICENSE).
 
 ## Credits
 
