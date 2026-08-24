@@ -15,3 +15,6 @@ venv/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Private working notes — never published
+PLAN.md
