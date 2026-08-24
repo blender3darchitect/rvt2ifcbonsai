@@ -144,7 +144,7 @@ This is a **display issue**, not a data issue. The IFC data (doors, windows, the
 
 ### Overview
 
-The script performs five fixes and two diagnostic passes:
+The script performs six fixes and two diagnostic passes:
 
 1. **Fix orphan IfcSpace aggregation** — Finds every `IfcSpace` that has no parent via `IfcRelAggregates` and connects it to the appropriate `IfcBuildingStorey` (matched by absolute elevation when possible, fallback to lowest storey). Reports the resulting per-storey distribution.
 
@@ -156,9 +156,11 @@ The script performs five fixes and two diagnostic passes:
 
 5. **Fix IfcShapeAspect.ProductDefinitional** — Sets the required `ProductDefinitional` attribute to `False` on entities where it's missing. This is a separate ODA issue that prevents IfcOpenShell's `Optimise` recipe from running.
 
-6. **Verification pass** — After all fixes, re-walks every element's containment chain to confirm no broken chains remain.
+6. **Blank the converter's header attribution** — cad2data writes its vendor name into the STEP header's `organization` and `authorization` fields, which Bonsai shows as Organisation and Authoriser. Both are cleared.
 
-7. **Void diagnostic** — Reports on void relationships (count, distribution) without modifying them.
+7. **Verification pass** — After all fixes, re-walks every element's containment chain to confirm no broken chains remain.
+
+8. **Void diagnostic** — Reports on void relationships (count, distribution) without modifying them.
 
 ### Detailed walkthrough
 
@@ -218,6 +220,19 @@ Some `IfcRelContainedInSpatialStructure` and `IfcRelAggregates` entities in the 
 #### Fix 5: IfcShapeAspect
 
 The `ProductDefinitional` attribute is required (not optional) on `IfcShapeAspect` in IFC4. ODA's writer leaves it as `None` on some entities. This doesn't affect Bonsai import, but it crashes IfcOpenShell's `Optimise` recipe when it tries to copy these entities to a new file. Setting it to `False` (the conservative default — "this shape aspect is not defining the product shape") resolves the issue.
+
+#### Fix 6: File header attribution
+
+The `FILE_NAME` entry in the STEP header carries the vendor name in two places:
+
+```
+FILE_NAME('0001','...',('User'),('DataDrivenConstruction'),'ODA SDAI 27.2',$,'DataDrivenConstruction');
+                                  ^ organization                             ^ authorization
+```
+
+Bonsai surfaces these as **Organisation** and **Authoriser** in Project Info. Those fields describe who authored and signed off the data — they are not the place to advertise the converter. Both are set to blank.
+
+What is deliberately left alone: `preprocessor_version` (`ODA SDAI 27.2`) and the `IfcApplication` / `IfcOrganization` entities naming `RVT2IFCconverter`. Those exist precisely to record which tool produced the file, and stripping them would misrepresent its provenance.
 
 ---
 
@@ -398,6 +413,10 @@ Every step runs locally. No cloud accounts, no Autodesk subscription, no uploads
 ## Version history
 
 The script prints its version at startup, so console output can be traced back to the code that produced it.
+
+### 0.0.4
+
+- Added Fix 6: blank the `organization` and `authorization` fields in the STEP header, which cad2data stamps with its vendor name and Bonsai displays as Organisation and Authoriser. The converter's own identification in `preprocessor_version` and `IfcApplication` is left intact.
 
 ### 0.0.3
 

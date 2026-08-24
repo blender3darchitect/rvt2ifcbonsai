@@ -144,7 +144,7 @@ Isso é um **problema de exibição**, não de dados. Os dados IFC (portas, jane
 
 ### Visão geral
 
-O script executa cinco correções e duas passagens de diagnóstico:
+O script executa seis correções e duas passagens de diagnóstico:
 
 1. **Corrige a agregação de IfcSpaces órfãos** — Encontra todo `IfcSpace` sem pai via `IfcRelAggregates` e o conecta ao `IfcBuildingStorey` apropriado (correspondido por elevação absoluta quando possível, com recuo para o pavimento mais baixo). Informa a distribuição resultante por pavimento.
 
@@ -156,9 +156,11 @@ O script executa cinco correções e duas passagens de diagnóstico:
 
 5. **Corrige IfcShapeAspect.ProductDefinitional** — Define o atributo obrigatório `ProductDefinitional` como `False` nas entidades em que ele está ausente. Este é um problema separado da ODA, que impede a execução da receita `Optimise` do IfcOpenShell.
 
-6. **Passagem de verificação** — Após todas as correções, percorre novamente a cadeia de contenção de cada elemento para confirmar que não restaram cadeias quebradas.
+6. **Limpa a atribuição de autoria no cabeçalho** — O cad2data grava o nome do fornecedor nos campos `organization` e `authorization` do cabeçalho STEP, que o Bonsai exibe como Organisation e Authoriser. Ambos são esvaziados.
 
-7. **Diagnóstico de voids** — Relata os relacionamentos de void (contagem, distribuição) sem modificá-los.
+7. **Passagem de verificação** — Após todas as correções, percorre novamente a cadeia de contenção de cada elemento para confirmar que não restaram cadeias quebradas.
+
+8. **Diagnóstico de voids** — Relata os relacionamentos de void (contagem, distribuição) sem modificá-los.
 
 ### Detalhamento
 
@@ -218,6 +220,19 @@ Algumas entidades `IfcRelContainedInSpatialStructure` e `IfcRelAggregates` do ar
 #### Correção 5: IfcShapeAspect
 
 O atributo `ProductDefinitional` é obrigatório (não opcional) em `IfcShapeAspect` no IFC4. O escritor da ODA o deixa como `None` em algumas entidades. Isso não afeta a importação no Bonsai, mas trava a receita `Optimise` do IfcOpenShell ao tentar copiar essas entidades para um novo arquivo. Defini-lo como `False` (o padrão conservador — "este shape aspect não define a forma do produto") resolve o problema.
+
+#### Correção 6: atribuição de autoria no cabeçalho
+
+A entrada `FILE_NAME` do cabeçalho STEP carrega o nome do fornecedor em dois lugares:
+
+```
+FILE_NAME('0001','...',('User'),('DataDrivenConstruction'),'ODA SDAI 27.2',$,'DataDrivenConstruction');
+                                  ^ organization                             ^ authorization
+```
+
+O Bonsai exibe esses campos como **Organisation** e **Authoriser** no Project Info. Eles descrevem quem elaborou e aprovou os dados — não são o lugar para divulgar o conversor. Ambos passam a ficar em branco.
+
+O que é deliberadamente preservado: `preprocessor_version` (`ODA SDAI 27.2`) e as entidades `IfcApplication` / `IfcOrganization` que identificam o `RVT2IFCconverter`. Elas existem justamente para registrar qual ferramenta produziu o arquivo, e removê-las falsearia sua procedência.
 
 ---
 
@@ -398,6 +413,10 @@ Todas as etapas rodam localmente. Sem contas na nuvem, sem assinatura da Autodes
 ## Histórico de versões
 
 O script imprime sua versão ao iniciar, para que a saída do console possa ser rastreada até o código que a produziu.
+
+### 0.0.4
+
+- Adicionada a Correção 6: esvazia os campos `organization` e `authorization` do cabeçalho STEP, que o cad2data preenche com o nome do fornecedor e o Bonsai exibe como Organisation e Authoriser. A identificação do próprio conversor em `preprocessor_version` e `IfcApplication` é preservada.
 
 ### 0.0.3
 

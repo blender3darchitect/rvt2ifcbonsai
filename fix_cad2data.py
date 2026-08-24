@@ -1,7 +1,7 @@
 """
 fix_cad2data.py — Repair of cad2data IFC for Bonsai
 
-Version 0.0.3
+Version 0.0.4
 
 The crash at collector.py:125 happens because elements are contained
 in IfcSpaces that have no parent in the spatial hierarchy (no
@@ -26,7 +26,7 @@ import ifcopenshell.util.placement
 import sys
 import os
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 # STATUS: early days. This has been validated against a small number of
 # cad2data conversions only. It needs testing against a much wider range of
@@ -240,6 +240,36 @@ def fix_file(input_path, output_path):
             sa_fixed += 1
             fixes += 1
     print(f"  Fixed {sa_fixed} entities")
+
+    # === FIX 6: Converter branding in the STEP header ===
+    # cad2data stamps its vendor name into the FILE_NAME organization and
+    # authorization fields, which Bonsai surfaces as Organisation and
+    # Authoriser in the Project Info panel. These describe who authored and
+    # signed off the data, not which tool wrote it — the converter already
+    # identifies itself in preprocessor_version and IfcApplication, both of
+    # which are left alone.
+    print("\n=== Fix 6: File header attribution ===")
+    header_fixed = 0
+    try:
+        file_name = f.header.file_name
+
+        organization = list(file_name.organization or [])
+        if any((entry or "").strip() for entry in organization):
+            print(f"  Organisation: {organization} -> blank")
+            file_name.organization = [""]
+            header_fixed += 1
+            fixes += 1
+
+        if (file_name.authorization or "").strip():
+            print(f"  Authoriser:   '{file_name.authorization}' -> blank")
+            file_name.authorization = ""
+            header_fixed += 1
+            fixes += 1
+
+        if not header_fixed:
+            print("  Organisation and Authoriser already blank — OK")
+    except Exception as e:
+        print(f"  Could not read or edit the file header: {e}")
 
     # === DIAGNOSTIC: Verify no broken chains remain ===
     print("\n=== Verification pass ===")
