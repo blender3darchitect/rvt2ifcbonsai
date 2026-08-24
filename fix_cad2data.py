@@ -274,7 +274,7 @@ def fix_file(input_path, output_path):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python fix_cad2data_v2.py input.ifc [output.ifc]")
+        print("Usage: python fix_cad2data.py input.ifc [output.ifc]")
         sys.exit(1)
 
     inp = sys.argv[1]
